@@ -1,22 +1,26 @@
+import gleam/bit_array
+import gleam/crypto.{Sha256, hash}
+import gleam/float
+import gleam/int
+import gleam/io
+import gleam/list
+import gleam/option.{type Option, None, Some}
+import gleam/result
+import gleam/string
 import prng/random
 import prng/seed
 import simplifile
-import gleam/result
-import gleam/string
-import gleam/float
-import gleam/io
-import gleam/list
-import gleam/int
-import gleam/bit_array
-import gleam/option.{type Option, None, Some}
-import gleam/crypto.{hash, Sha256}
 
 pub type AccountData {
   AccountData(account_number: String, balance: Float)
 }
 
 pub type MerkleNode {
-  MerkleNode(hash: BitArray, left: Option(MerkleNode), right: Option(MerkleNode))
+  MerkleNode(
+    hash: BitArray,
+    left: Option(MerkleNode),
+    right: Option(MerkleNode),
+  )
 }
 
 pub fn generate_random_accounts(count: Int) -> List(AccountData) {
@@ -33,7 +37,8 @@ pub fn process_accounts(accounts: List(AccountData)) {
   let result = create_merkle_tree(accounts)
 
   case result {
-    Ok(#(root, _)) -> { // (root, leaf_nodes) 
+    Ok(#(root, _)) -> {
+      // (root, leaf_nodes) 
       let root_hash = bit_array.base16_encode(root.hash)
       io.println("Merkle Root: " <> root_hash)
       // io.println("\nLeaf Hashes:")
@@ -65,13 +70,17 @@ fn serialize_merkle_node(node: MerkleNode, depth: Int) -> String {
   let indent = string.repeat(" ", depth * 2)
   let hash = bit_array.base16_encode(node.hash)
   let current = indent <> "Hash: " <> hash <> "\n"
-  
+
   case node.left, node.right {
     None, None -> current
     Some(left), Some(right) -> {
       current
-      <> indent <> "Left:\n" <> serialize_merkle_node(left, depth + 1)
-      <> indent <> "Right:\n" <> serialize_merkle_node(right, depth + 1)
+      <> indent
+      <> "Left:\n"
+      <> serialize_merkle_node(left, depth + 1)
+      <> indent
+      <> "Right:\n"
+      <> serialize_merkle_node(right, depth + 1)
     }
     _, _ -> current <> indent <> "Error: Inconsistent tree structure\n"
   }
@@ -84,19 +93,24 @@ fn serialize_merkle_node(node: MerkleNode, depth: Int) -> String {
 //   })
 // }
 
-fn create_merkle_tree(accounts: List(AccountData)) -> Result(#(MerkleNode, List(MerkleNode)), String) {
+fn create_merkle_tree(
+  accounts: List(AccountData),
+) -> Result(#(MerkleNode, List(MerkleNode)), String) {
   case accounts {
     [] -> Error("Cannot create a Merkle tree from an empty list of accounts")
     _ -> {
-      let sorted_accounts = list.sort(accounts, fn(a, b) { 
-        string.compare(a.account_number, b.account_number) 
-      })
+      let sorted_accounts =
+        list.sort(accounts, fn(a, b) {
+          string.compare(a.account_number, b.account_number)
+        })
 
-      let leaf_nodes = list.map(sorted_accounts, fn(account) {
-        let data = account.account_number <> ":" <> float.to_string(account.balance)
-        let hash = hash(Sha256, bit_array.from_string(data))
-        MerkleNode(hash, None, None)
-      })
+      let leaf_nodes =
+        list.map(sorted_accounts, fn(account) {
+          let data =
+            account.account_number <> ":" <> float.to_string(account.balance)
+          let hash = hash(Sha256, bit_array.from_string(data))
+          MerkleNode(hash, None, None)
+        })
 
       case build_tree(leaf_nodes) {
         Ok(root) -> Ok(#(root, leaf_nodes))
@@ -106,31 +120,31 @@ fn create_merkle_tree(accounts: List(AccountData)) -> Result(#(MerkleNode, List(
   }
 }
 
-
 fn build_tree(nodes: List(MerkleNode)) -> Result(MerkleNode, String) {
   case nodes {
     [] -> Error("Cannot build a tree from an empty list of nodes")
     [single] -> Ok(single)
     _ -> {
       let paired_nodes = list.sized_chunk(nodes, 2)
-      let new_level = list.try_map(paired_nodes, fn(pair) {
-        case pair {
-          [] -> Error("Unexpected empty pair")
-          [single] -> {
-            // Duplicate the last node if odd number of nodes
-            let combined_hash = bit_array.append(single.hash, single.hash)
-            let parent_hash = hash(Sha256, combined_hash)
-            Ok(MerkleNode(parent_hash, Some(single), Some(single)))
+      let new_level =
+        list.try_map(paired_nodes, fn(pair) {
+          case pair {
+            [] -> Error("Unexpected empty pair")
+            [single] -> {
+              // Duplicate the last node if odd number of nodes
+              let combined_hash = bit_array.append(single.hash, single.hash)
+              let parent_hash = hash(Sha256, combined_hash)
+              Ok(MerkleNode(parent_hash, Some(single), Some(single)))
+            }
+            [left, right] -> {
+              let combined_hash = bit_array.append(left.hash, right.hash)
+              let parent_hash = hash(Sha256, combined_hash)
+              Ok(MerkleNode(parent_hash, Some(left), Some(right)))
+            }
+            _ -> Error("Unexpected number of nodes in pair")
           }
-          [left, right] -> {
-            let combined_hash = bit_array.append(left.hash, right.hash)
-            let parent_hash = hash(Sha256, combined_hash)
-            Ok(MerkleNode(parent_hash, Some(left), Some(right)))
-          }
-          _ -> Error("Unexpected number of nodes in pair")
-        }
-      })
-      
+        })
+
       case new_level {
         Ok(level) -> build_tree(level)
         Error(msg) -> Error(msg)
